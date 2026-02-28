@@ -14,24 +14,57 @@ pipeline {
       }
     }
 
-    stage('Docker Build') {
+    stage('Docker Build & Push with Kaniko') {
       steps {
-        sh "docker build -t ${IMAGE}:${TAG} ."
-      }
-    }
+        sh """
+          kubectl run kaniko-${TAG} \
+            --image=gcr.io/kaniko-project/executor:latest \
+            --restart=Never \
+            --namespace=jenkins \
+            --overrides='{
+              "spec": {
+                "containers": [{
+                  "name": "kaniko",
+                  "image": "gcr.io/kaniko-project/executor:latest",
+                  "args": [
+                    "--dockerfile=Dockerfile",
+                    "--context=git://github.com/Thongvm1111/app-repo",
+                    "--destination=${IMAGE}:${TAG}"
+                  ],
+                  "volumeMounts": [{
+                    "name": "dockerhub-secret",
+                    "mountPath": "/kaniko/.docker"
+                  }]
+                }],
+                "volumes": [{
+                  "name": "dockerhub-secret",
+                  "secret": {
+                    "secretName": "dockerhub-secret",
+                    "items": [{
+                      "key": ".dockerconfigjson",
+                      "path": "config.json"
+                    }]
+                  }
+                }],
+                "restartPolicy": "Never"
+              }
+            }' \
+            --wait=true \
+            --timeout=300s || true
 
-    stage('Docker Push') {
-      steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'dockerhub-creds',
-          usernameVariable: 'USER',
-          passwordVariable: 'PASS'
-        )]) {
-          sh """
-            echo $PASS | docker login -u $USER --password-stdin
-            docker push ${IMAGE}:${TAG}
-          """
-        }
+          # Kiểm tra kết quả
+          kubectl wait --for=condition=Ready=false pod/kaniko-${TAG} -n jenkins --timeout=300s || true
+          STATUS=\$(kubectl get pod kaniko-${TAG} -n jenkins -o jsonpath='{.status.phase}')
+          echo "Kaniko pod status: \$STATUS"
+
+          # Xóa pod sau khi xong
+          kubectl delete pod kaniko-${TAG} -n jenkins || true
+
+          if [ "\$STATUS" != "Succeeded" ]; then
+            echo "Kaniko build failed!"
+            exit 1
+          fi
+        """
       }
     }
 
