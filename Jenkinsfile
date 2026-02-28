@@ -27,7 +27,6 @@ pipeline {
                   "name": "kaniko",
                   "image": "gcr.io/kaniko-project/executor:latest",
                   "args": [
-                    "--dockerfile=/workspace/Dockerfile",
                     "--context=git://github.com/Thongvm1111/app-repo#refs/heads/main",
                     "--destination=${IMAGE}:${TAG}"
                   ],
